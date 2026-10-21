@@ -23,11 +23,13 @@ dbeta = tol;
 limits = [-0.0075 0.0075]; % colorbar limits for plotting fluid height
 plotCM = 1; % toggle to plot the CoM of each particle (1 = plot, 0 = don't)
 
-Nmin = 150; % minimum number of boundary points per particle
-Nmax = 400; % maximum number of boundary points per particle
-C_domain = 0.01; % domain grid spacing is 1% of the characteristic size of the particle assembly    
+% adaptive stuff for boundary points  
 C_BEM = 0.05; % want 1/C_BEM = 20 boundary points across the particle/gap length scale
 C_curv = 0.05; % want 1/C_curv = 20 boundary points per min radius of curvature
+times_dev = 5; % Number of points will be multiplied by 1 + times_dev * dev. delta z / L = dev, where delta z is max amplitude of wavy surface
+
+% for domain plotting
+C_domain = 0.01; % domain grid spacing is 1% of the characteristic size of the particle assembly  
 
 view_init = 0; % flag to plot initial meniscus solve before equilibrium is found
 to_plot_init = 0; % flag to plot initial rotation stuff. Keep this turned off if doing full iteration! This is for testing
@@ -35,22 +37,115 @@ check_manufactured = 1; % check BEM solve against a manufactured solution
 
 %% GUI stuff
 
-% set particle number, mass and thickness, choose pinning
-[m, thickness, M, is_flipped, snapToGrid, gridSpacing, inputMethod] = getParametersGUI();
+% set particle number, mass and thickness, char. length, choose pinning,
+% point # selection
+[m, thickness, L, M, is_flipped, snapToGrid, gridSpacing, MassOrDensity, ParticleDensity, N, Nmin, Nmax] = getParametersGUI();
 
-% set particle positions (centers of geometry) and characteristic length
-if strcmp(inputMethod,'graphical')
-    [xcog_stacked, ycog_stacked, L] = particlePositionGraphicalGUI(gridSpacing, snapToGrid, M);
-else
-    [xcog_stacked, ycog_stacked, L] = particlePositionWriteInGUI(M);
+% if the user inputs mass, we can use it directly. If they input density,
+% we'll compute the mass from this + volume later
+if MassOrDensity % = 1 means user input mass, = 0 means user input density
+    m_stacked = m*ones(M,1);
 end
 
-% particle surface equation
-dev = surfaceWavinessGUI(); % dev is the dimensionless amplitude of deformation relative to L: delta z / L = dev, where delta z is max amplitude
-f = @(x,y,xcog,ycog) dev * L * (((x-xcog)/L).^2 - ((y-ycog)/L).^2);
+% get contour information and CoM displacement
+[x_nodes_prior, y_nodes_prior, xcm_dist, ycm_dist, zcm_dist, user_set_cm, perimeter, Rmin] = drawContourGUI(L, snapToGrid, gridSpacing, thickness);
 
-% get contour and center of mass displacement
-[x_nodes, y_nodes, xcm_dist, ycm_dist, zcm_dist, user_set_cm, N, perimeter, Rmin, ds] = drawContourGUI(L, snapToGrid, gridSpacing, M, xcog_stacked, ycog_stacked, dev, Nmin, Nmax, C_BEM, C_curv, thickness); % xcm_dist and ycm_dist are distance of the CoM to the CoG (how displaced is the CoM?)
+% set particle positions (centers of geometry)
+[xcog_stacked, ycog_stacked] = particlePositionGraphicalGUI(gridSpacing, snapToGrid, M, x_nodes_prior, y_nodes_prior, xcm_dist, ycm_dist);
+
+% particle surface equation 
+f = getSurfaceFunctionGUI(L);
+z_test_height = f(x_nodes_prior,y_nodes_prior,0,0);
+dev = (max(z_test_height) - min(z_test_height))/L; % delta z / L = dev, where delta z is max amplitude of wavy surface
+
+xcm_dist_stacked = xcm_dist*ones(M,1);
+ycm_dist_stacked = ycm_dist*ones(M,1);
+xcm_stacked = xcog_stacked + xcm_dist_stacked;
+ycm_stacked = ycog_stacked + ycm_dist_stacked;
+
+x_nodes_prior = x_nodes_prior';
+y_nodes_prior = y_nodes_prior';
+x_nodes_prior_stacked = repmat(x_nodes_prior,M,1) + xcog_stacked;
+y_nodes_prior_stacked = repmat(y_nodes_prior,M,1) + ycog_stacked;
+
+
+% user chooses initial heights and yaw angles
+[zcm_height_stacked, gamma_stacked] = initialConditionsGUI(M, x_nodes_prior_stacked, y_nodes_prior_stacked, xcog_stacked, ycog_stacked, xcm_stacked, ycm_stacked, L);
+
+% pitch and roll initialized to 0
+alpha_stacked = zeros(M,1);
+beta_stacked = zeros(M,1);
+
+
+rotated_x = zeros(M, length(x_nodes_prior_stacked(1,:)));
+rotated_y = zeros(M, length(y_nodes_prior_stacked(1,:)));
+
+% if the user didn't prescribe N, compute it based on particle geometry &
+% configuration
+
+min_edge_distance = inf;
+
+for i = 1:M-1
+    for j = i+1:M
+    gamma_i = gamma_stacked(i);
+    gamma_j = gamma_stacked(j);
+
+    xi = x_nodes_prior_stacked(i,:);
+    yi = y_nodes_prior_stacked(i,:);
+    xj = x_nodes_prior_stacked(j,:);
+    yj = y_nodes_prior_stacked(j,:);
+
+
+    xci = xcm_stacked(i);
+    yci = ycm_stacked(i);
+    xcj = xcm_stacked(j);
+    ycj = ycm_stacked(j);
+
+    % Counter-clockwise rotation about the center of mass
+    x_rot_i = xci + (xi - xci)*cos(gamma_i) - (yi - yci)*sin(gamma_i);
+    y_rot_i = yci + (xi - xci)*sin(gamma_i) + (yi - yci)*cos(gamma_i);
+    x_rot_j = xcj + (xj - xcj)*cos(gamma_j) - (yj - ycj)*sin(gamma_j);
+    y_rot_j = ycj + (xj - xcj)*sin(gamma_j) + (yj - ycj)*cos(gamma_j);
+
+    % store these to compute domain boundaries in a sec
+    rotated_x(i,:) = x_rot_i;
+    rotated_y(i,:) = y_rot_i;
+
+    dx = x_rot_i' - x_rot_j;
+    dy = y_rot_i' - y_rot_j;
+
+    d = min(hypot(dx, dy), [], 'all');
+    min_edge_distance = min(min_edge_distance, d);
+    end
+end
+
+if isfinite(min_edge_distance)
+    smallestLengthScale = min(L,min_edge_distance);
+else
+    smallestLengthScale = L;
+end
+ds = min(C_BEM*smallestLengthScale, C_curv*Rmin);
+devFactor = 1 + times_dev*dev;
+
+if isnan(N)
+    N = ceil(devFactor * perimeter/ds);
+    N = min(Nmax,max(N,Nmin));
+end
+
+% store last boundary to compute domain boundaries in a sec
+rotated_x(M,:) = x_rot_j;
+rotated_y(M,:) = y_rot_j;
+
+% resample countor uniformly in arclength with N points
+s = [0; cumsum(hypot(diff(x_nodes_prior'), diff(y_nodes_prior')))];
+perimeter = s(end);
+
+% New uniform arclength grid
+sNew = (0:N-1)' * perimeter/N;
+
+% Resample
+x_nodes = interp1(s, x_nodes_prior, sNew, 'linear');
+y_nodes = interp1(s, y_nodes_prior, sNew, 'linear');
 
 % zcm_dist is the vertical distance FROM the surface, z = f(xcm,ycm), TO the center of mass
 if user_set_cm
@@ -60,29 +155,21 @@ else
 end
 
 % bookkeeping of stacked representations of particles and their CoMs
-m_stacked = m*ones(M,1);
 x_nodes = x_nodes';
 y_nodes = y_nodes';
 x_nodes_stacked = repmat(x_nodes,M,1) + xcog_stacked;
 y_nodes_stacked = repmat(y_nodes,M,1) + ycog_stacked;
 
-xcm_dist_stacked = xcm_dist*ones(M,1);
-ycm_dist_stacked = ycm_dist*ones(M,1);
-xcm_stacked = xcog_stacked + xcm_dist_stacked;
-ycm_stacked = ycog_stacked + ycm_dist_stacked;
 
-% for domain plotting
-[min_x,max_x] = bounds(x_nodes_stacked,'all');
-[min_y,max_y] = bounds(y_nodes_stacked,'all');
+% for domain plotting - dependent on rotated boundaries
+[min_x,max_x] = bounds(rotated_x,'all');
+[min_y,max_y] = bounds(rotated_y,'all');
 char_scale = max(max_x-min_x,max_y-min_y); % for plotting
 grid_range = 1.2*char_scale; 
 
 % domain points: resolve overall particle-assembly scale
 dx_domain = C_domain*char_scale;
 N_domain = ceil(grid_range/dx_domain) + 1;
-
-% user chooses heights and initial rotations
-[zcm_height_stacked, alpha_stacked, beta_stacked, gamma_stacked] = initialConditionsGUI(M, x_nodes_stacked, y_nodes_stacked, xcog_stacked, ycog_stacked, xcm_stacked, ycm_stacked);
 
 % convert to radians
 alpha_stacked = alpha_stacked*pi/180;
@@ -271,15 +358,27 @@ for p=1:M % for each particle
 
 end
 
-
-if thickness ~= 0
-    fprintf('Particle density: %.2f g/cm^3\n',m_stacked(1)/V_stacked(1));
+if MassOrDensity
+    if thickness ~= 0
+        fprintf('Particle density: %.2f g/cm^3\n',m_stacked(1)/V_stacked(1));
+    else
+        % Surface area of the wavy surface
+        dA_magnitude = sqrt(dAx.^2 + dAy.^2 + dAz.^2);
+        A_wavy = sum(dA_magnitude(inside));
+        fprintf('Particle density per unit length (0 thickness): %.2f g/cm^2\n',m_stacked(1)/A_wavy);
+    end
 else
-    fprintf('Particle density: N/A (0 thickness)\n');
+    if thickness ~= 0
+        m = ParticleDensity * V_stacked(1); % compute mass from supplied density
+    else
+        % Surface area of the wavy surface
+        dA_magnitude = sqrt(dAx.^2 + dAy.^2 + dAz.^2);
+        A_wavy = sum(dA_magnitude(inside));
+        m = ParticleDensity * A_wavy;
+    end
+    m_stacked = m*ones(M,1);
+    fprintf('Particle mass: %.2f g\n',m);
 end
-
-
-fprintf('Forces [g cm / s^2] = dynes, torques [g cm^2 / s^2] = dyne-centimeters\n\n');
 
 
 
@@ -301,7 +400,7 @@ if any(overlap_matrix,'all')
     scatter(x_proj_stacked,y_proj_stacked);
     hold on
     scatter(xcm_stacked,ycm_stacked);
-    error('Particles overlap!');
+    error('Error: particles overlap!');
 end
 
 
@@ -499,7 +598,8 @@ close(hWaitbar);
 fprintf('\n INITIAL SINGLE-PARTICLE SOLVE FOR BASELINE\n');
 fprintf(['\n *** Number of iterations: ',num2str(iters),' ***\n\n']);
 
-fprintf('*** Baseline forces and torques for lone particle: ***\n\n');
+fprintf('*** Baseline forces and torques for lone particle: ***\n');
+fprintf('Forces [g cm / s^2] = dynes, torques [g cm^2 / s^2] = dyne-centimeters\n\n');
 
 fprintf(['Baseline force (z, vertical): ',num2str(Fz_baseline),'\n']);
 fprintf(['Baseline torque (x, roll): ',num2str(Tx_baseline),'\n']);
@@ -576,7 +676,8 @@ Ty_stacked = zeros(M,1);
 
 fprintf('\n FINAL FULL ASSEMBLY SOLVE\n');
 
-fprintf('*** Initial forces and torques: ***\n\n');
+fprintf('*** Initial forces and torques: ***\n');
+fprintf('Forces [g cm / s^2] = dynes, torques [g cm^2 / s^2] = dyne-centimeters\n\n');
 
 for p=1:M
     mu = mu_stacked((p-1)*N+1:p*N);
@@ -833,7 +934,8 @@ end
 close(hWaitbar);
 fprintf(['\n *** Number of iterations: ',num2str(iters),' ***\n\n']);
 
-fprintf('*** Final forces and torques: ***\n\n');
+fprintf('*** Final forces and torques: ***\n');
+fprintf('Forces [g cm / s^2] = dynes, torques [g cm^2 / s^2] = dyne-centimeters\n\n');
 
 for p=1:M
     Fx = Fx_stacked(p);
@@ -851,7 +953,8 @@ for p=1:M
     fprintf(['Final torque (z, yaw): ',num2str(Tz),'\n\n']);
 end
 
-fprintf('*** Check for conservation of angular momentum (zero net torque) and zero net force: ***\n\n');
+fprintf('*** Check for conservation of angular momentum (zero net torque) and zero net force: ***\n');
+fprintf('Forces [g cm / s^2] = dynes, torques [g cm^2 / s^2] = dyne-centimeters\n\n');
 [residual_torque,residual_force_x,residual_force_y] = CheckGlobalTorque(xcm_stacked, ycm_stacked, Fx_stacked, Fy_stacked, Tz_stacked);
 
 %% look at final equilibrium solution

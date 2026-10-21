@@ -1,31 +1,7 @@
-function [x,y,N,perimeter,Rmin,ds] = processDrawnParticleContour(pos,L,min_edge_distance, C_BEM, C_curv, Nmin, Nmax, devFactor)
+function [x,y,perimeter,Rmin] = processDrawnParticleContour(pos,L)
 
 % Also used ChatGPT
 
-
-% ============================================================
-% Process a user-drawn particle contour
-%
-% The raw contour is intentionally reduced to a coarse,
-% rounded representation before determining the BEM resolution.
-%
-% Inputs:
-%   pos                - Nx2 array of points from drawfreehand
-%   L                  - characteristic particle radius
-%   min_edge_distance  - minimum distance between particles
-%
-% Outputs:
-%   x,y                - equally spaced boundary points for BEM
-%   N                  - number of BEM boundary points
-%   perimeter          - physical particle perimeter
-%   Rmin               - minimum radius of curvature
-%   ds                 - BEM boundary point spacing
-%
-% ============================================================
-
-
-% This controls how much of the small-scale detail in the
-% hand-drawn contour is retained (smaller = coarser)
 nShape = 20;
 
 
@@ -182,41 +158,9 @@ kappaMax = max(kappa);
 Rmin = 1/kappaMax;
 
 
-%% ------------------------------------------------------------
-% 9. Determine target BEM spacing
-% ------------------------------------------------------------
 
-% if isfinite(min_edge_distance)
-% 
-%     smallestLengthScale = min(Rmin,min_edge_distance);
-% 
-% else
-% 
-%     smallestLengthScale = Rmin;
-% 
-% end
-
-if isfinite(min_edge_distance)
-
-    smallestLengthScale = min(L,min_edge_distance);
-
-else
-
-    smallestLengthScale = L;
-
-end
-
-ds = min(C_BEM*smallestLengthScale, C_curv*Rmin);
-
-
-%% ------------------------------------------------------------
-% 10. Determine number of BEM points
-% ------------------------------------------------------------
-
-
-N = ceil(devFactor * perimeter/ds);
-
-N = min(Nmax,max(N,Nmin));
+% lots of points for fine contour
+N = 100*perimeter;
 
 
 %% ------------------------------------------------------------

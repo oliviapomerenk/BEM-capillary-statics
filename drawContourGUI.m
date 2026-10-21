@@ -1,51 +1,10 @@
-function [x, y, xcm, ycm, zcm, user_set_cm, N, perimeter, Rmin, ds] = drawContourGUI(L, snapToGrid, gridSpacing, M, xcog_stacked, ycog_stacked, dev, Nmin, Nmax, C_BEM, C_curv, thickness)
+function [x, y, xcm, ycm, zcm, user_set_cm, perimeter, Rmin] = drawContourGUI(L, snapToGrid, gridSpacing, thickness)
 
     % Developed with assistance from ChatGPT
-
-    devFactor = 1 + 5*dev; % wavier particles (in 3D) get more points
-
-    % get approximate minimum gap among particles -- for computing # boundary points
-    if M ~= 1
-
-        D = 2*L; % effective particle diameter
-
-        dx = xcog_stacked - xcog_stacked.'; % pairwise center-to-center distances
-        dy = ycog_stacked - ycog_stacked.';
-
-        dist_centers = sqrt(dx.^2 + dy.^2);
-
-        dist_centers(dist_centers == 0) = Inf; % ignore self-distances
-
-        min_edge_distance = min(dist_centers(:)) - D; % Minimum edge-to-edge distance
-
-        if min_edge_distance < 0
-
-            disp('Warning: current configuration may involve overlaps.')
-
-            min_edge_distance = input('Assign characteristic inter-particle gap in cm: ');
-
-            disp('Note that an error will be thrown later if particles overlap after the user defines particle shape & gives initial rotations.');
-
-        end
-
-    else
-
-        min_edge_distance = Inf;
-
-    end
 
     % Check inputs
     if nargin < 1 || ~isscalar(L) || L <= 0
         error('L must be a positive scalar.');
-    end
-
-    % Optional inputs
-    if nargin < 2
-        snapToGrid = false;
-    end
-
-    if nargin < 3
-        gridSpacing = 0.1;
     end
 
     % Initialize particle center
@@ -69,7 +28,7 @@ function [x, y, xcm, ycm, zcm, user_set_cm, N, perimeter, Rmin, ds] = drawContou
         'FontSize', 14);
 
     shapeDropdown = uidropdown(fig, ...
-        'Items', {'Circle', 'Ellipse', 'Custom'}, ...
+        'Items', {'Circle', 'Ellipse', 'Custom (user-drawn)'}, ...
         'Value', 'Circle', ...
         'Position', [50 195 200 30], ...
         'ValueChangedFcn', @shapeChanged);
@@ -122,16 +81,13 @@ function [x, y, xcm, ycm, zcm, user_set_cm, N, perimeter, Rmin, ds] = drawContou
         perimeter = 2*pi*L;
         Rmin = L;
 
-        if isfinite(min_edge_distance)
-            smallestLengthScale = min(L,min_edge_distance);
-        else
-            smallestLengthScale = L;
-        end
+        % if isfinite(min_edge_distance)
+        %     smallestLengthScale = min(L,min_edge_distance);
+        % else
+        %     smallestLengthScale = L;
+        % end
 
-        ds = min(C_BEM*smallestLengthScale, C_curv*Rmin);
-
-        N = ceil(devFactor * perimeter/ds);
-        N = min(Nmax,max(N,Nmin));
+        N = 100*perimeter;
 
         theta = linspace(0, 2*pi, N+1)';
         theta(end) = [];
@@ -158,16 +114,7 @@ function [x, y, xcm, ycm, zcm, user_set_cm, N, perimeter, Rmin, ds] = drawContou
 
         Rmin = b^2/L;
 
-        if isfinite(min_edge_distance)
-            smallestLengthScale = min(L,min_edge_distance);
-        else
-            smallestLengthScale = L;
-        end
-
-        ds = min(C_BEM*smallestLengthScale, C_curv*Rmin);
-
-        N = ceil(devFactor * perimeter/ds);
-        N = min(Nmax,max(N,Nmin));
+        N = 100*perimeter;
 
         theta = linspace(0, 2*pi, N+1)';
         theta(end) = [];
@@ -175,15 +122,6 @@ function [x, y, xcm, ycm, zcm, user_set_cm, N, perimeter, Rmin, ds] = drawContou
         % ellipse
         x = L*cos(theta);
         y = b*sin(theta);
-
-        % irregular shape
-        % r = L*(1 + 0.12*cos(theta) + 0.08*cos(2*theta) + 0.05*sin(3*theta));
-
-        % triangle-ish, order 3 rotational symmetry
-        % r = L*(1+0.18*cos(3*theta) - 0.03*cos(6*theta));
-        %
-        % x = r.*cos(theta);
-        % y = r.*sin(theta);
 
         % for a true ellipse, the centroid is at 0, but this is in case the
         % user wants to write in their own function / for testing
@@ -197,7 +135,7 @@ function [x, y, xcm, ycm, zcm, user_set_cm, N, perimeter, Rmin, ds] = drawContou
         x = x(:);
         y = y(:);
 
-    elseif strcmp(selectedShape, 'Custom')
+    elseif strcmp(selectedShape, 'Custom (user-drawn)')
 
         % -----------------------------------------------------
         % Custom contour
@@ -211,18 +149,21 @@ function [x, y, xcm, ycm, zcm, user_set_cm, N, perimeter, Rmin, ds] = drawContou
             'Position', [50 550 600 40], ...
             'Text', ['Draw the contour by clicking and dragging. You do not need to ' ...
                      'return exactly to the starting point; the contour will ' ...
-                     'automatically close when you release the mouse.'], ...
+                     'automatically close when you release the mouse. The shape will be scaled based on the prescribed radius of the bounding circle.'], ...
             'HorizontalAlignment', 'center', ...
             'WordWrap', 'on', ...
             'FontSize', 11);
 
         ax = uiaxes(fig, ...
-                    'Position', [50 100 600 440]);
+            'Position', [50 100 600 440]);
 
         axis(ax, 'equal');
 
         ax.XGrid = 'on';
         ax.YGrid = 'on';
+
+        ax.XTickLabel = {};
+        ax.YTickLabel = {};
 
         title(ax, 'Draw a closed contour');
 
@@ -246,7 +187,7 @@ function [x, y, xcm, ycm, zcm, user_set_cm, N, perimeter, Rmin, ds] = drawContou
         % Extract contour coordinates
         pos = h.Position;
 
-        [x,y,N,perimeter,Rmin,ds] = processDrawnParticleContour(pos,L,min_edge_distance, C_BEM, C_curv, Nmin, Nmax, devFactor);
+        [x,y,perimeter,Rmin] = processDrawnParticleContour(pos,L);
 
         % Close drawing figure
         if isvalid(fig)
@@ -294,10 +235,10 @@ function [x, y, xcm, ycm, zcm, user_set_cm, N, perimeter, Rmin, ds] = drawContou
          'HitTest', 'off', ...
          'PickableParts', 'none');
 
-    xlabel(ax, 'x');
-    ylabel(ax, 'y');
+    xlabel(ax, 'x (cm)');
+    ylabel(ax, 'y (cm)');
 
-    title(ax, 'Select a center of mass');
+    title(ax, 'Particle and center of mass (CoM)');
 
     % ---------------------------------------------------------
     % Homogeneous particle checkbox
@@ -334,11 +275,11 @@ function [x, y, xcm, ycm, zcm, user_set_cm, N, perimeter, Rmin, ds] = drawContou
     % ---------------------------------------------------------
 
     uilabel(fig, ...
-        'Position', [50 48 60 22], ...
-        'Text', 'x CoM:');
+        'Position', [50 48 80 22], ...
+        'Text', 'x CoM (cm):');
 
     xcmField = uieditfield(fig, 'numeric', ...
-        'Position', [100 48 80 25], ...
+        'Position', [120 48 80 25], ...
         'Value', 0, ...
         'Enable', 'off');
 
@@ -347,11 +288,11 @@ function [x, y, xcm, ycm, zcm, user_set_cm, N, perimeter, Rmin, ds] = drawContou
     % ---------------------------------------------------------
 
     uilabel(fig, ...
-        'Position', [230 48 60 22], ...
-        'Text', 'y CoM:');
+        'Position', [230 48 80 22], ...
+        'Text', 'y CoM (cm):');
 
     ycmField = uieditfield(fig, 'numeric', ...
-        'Position', [280 48 80 25], ...
+        'Position', [300 48 80 25], ...
         'Value', 0, ...
         'Enable', 'off');
 
@@ -360,11 +301,11 @@ function [x, y, xcm, ycm, zcm, user_set_cm, N, perimeter, Rmin, ds] = drawContou
     % ---------------------------------------------------------
 
     uilabel(fig, ...
-        'Position', [50 12 410 22], ...
-        'Text', 'z CoM relative to bottom surface at (xcm,ycm). Default is thickness/2.');
+        'Position', [50 12 430 22], ...
+        'Text', 'z CoM (cm) relative to bottom surface at (x CoM, y CoM) (default: thickness/2):');
 
     zcmField = uieditfield(fig, 'numeric', ...
-        'Position', [450 12 70 25], ...
+        'Position', [480 12 70 25], ...
         'Value', thickness/2, ...
         'Enable', 'off');
 
@@ -383,7 +324,7 @@ function [x, y, xcm, ycm, zcm, user_set_cm, N, perimeter, Rmin, ds] = drawContou
 
     uibutton(fig, 'push', ...
         'Text', 'Finish', ...
-        'Position', [545 40 80 40], ...
+        'Position', [600 20 80 40], ...
         'ButtonPushedFcn', @finishCenter);
 
     % Allow user to click a point on the axes
