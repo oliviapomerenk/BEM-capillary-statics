@@ -104,8 +104,8 @@ function [x, y, xcm, ycm, zcm, user_set_cm, perimeter, Rmin] = drawContourGUI(L,
         % Ellipse with semimajor axis L and eccentricity e
         % -----------------------------------------------------
 
-        if e <= 0 || e >= 1
-            error('The eccentricity must satisfy 0 < e < 1.');
+        if e < 0 || e >= 1
+            error('The eccentricity must satisfy 0 <= e < 1.');
         end
 
         b = L*sqrt(1-e^2);
@@ -122,6 +122,15 @@ function [x, y, xcm, ycm, zcm, user_set_cm, perimeter, Rmin] = drawContourGUI(L,
         % ellipse
         x = L*cos(theta);
         y = b*sin(theta);
+       
+        % sample weird shape - note would have to supply Rmin and perimeter too in
+        % order to do adaptive point meshing properly! These calculations,
+        % and scaling the shape with L, could be done similarly as in the
+        % custom-drawn case.
+        % r_unscaled = 3 + sin(theta) + cos(theta) + 0.5*sin(2*theta);
+        % r_scaled = (L / 4.6291) * r_unscaled; % needs to scale with L
+        % x = r_scaled .* cos(theta);
+        % y = r_scaled .* sin(theta);
 
         % for a true ellipse, the centroid is at 0, but this is in case the
         % user wants to write in their own function / for testing

@@ -85,39 +85,57 @@ rotated_y = zeros(M, length(y_nodes_prior_stacked(1,:)));
 
 min_edge_distance = inf;
 
-for i = 1:M-1
-    for j = i+1:M
-    gamma_i = gamma_stacked(i);
-    gamma_j = gamma_stacked(j);
-
-    xi = x_nodes_prior_stacked(i,:);
-    yi = y_nodes_prior_stacked(i,:);
-    xj = x_nodes_prior_stacked(j,:);
-    yj = y_nodes_prior_stacked(j,:);
-
-
-    xci = xcm_stacked(i);
-    yci = ycm_stacked(i);
-    xcj = xcm_stacked(j);
-    ycj = ycm_stacked(j);
-
-    % Counter-clockwise rotation about the center of mass
-    x_rot_i = xci + (xi - xci)*cos(gamma_i) - (yi - yci)*sin(gamma_i);
-    y_rot_i = yci + (xi - xci)*sin(gamma_i) + (yi - yci)*cos(gamma_i);
+if M > 1
+    for i = 1:M-1
+        for j = i+1:M
+            gamma_i = gamma_stacked(i);
+            gamma_j = gamma_stacked(j);
+        
+            xi = x_nodes_prior_stacked(i,:);
+            yi = y_nodes_prior_stacked(i,:);
+            xj = x_nodes_prior_stacked(j,:);
+            yj = y_nodes_prior_stacked(j,:);
+        
+        
+            xci = xcm_stacked(i);
+            yci = ycm_stacked(i);
+            xcj = xcm_stacked(j);
+            ycj = ycm_stacked(j);
+        
+            % Counter-clockwise rotation about the center of mass
+            x_rot_i = xci + (xi - xci)*cos(gamma_i) - (yi - yci)*sin(gamma_i);
+            y_rot_i = yci + (xi - xci)*sin(gamma_i) + (yi - yci)*cos(gamma_i);
+            x_rot_j = xcj + (xj - xcj)*cos(gamma_j) - (yj - ycj)*sin(gamma_j);
+            y_rot_j = ycj + (xj - xcj)*sin(gamma_j) + (yj - ycj)*cos(gamma_j);
+        
+            % store these to compute domain boundaries in a sec
+            rotated_x(i,:) = x_rot_i;
+            rotated_y(i,:) = y_rot_i;
+        
+            dx = x_rot_i' - x_rot_j;
+            dy = y_rot_i' - y_rot_j;
+        
+            d = min(hypot(dx, dy), [], 'all');
+            min_edge_distance = min(min_edge_distance, d);
+        end
+    end
+    % store last boundary to compute domain boundaries in a sec
+    rotated_x(M,:) = x_rot_j;
+    rotated_y(M,:) = y_rot_j;
+else
+    % don't need a min edge distance, but still need to rotate boundary
+    gamma_j = gamma_stacked(1);
+    xj = x_nodes_prior_stacked(1,:);
+    yj = y_nodes_prior_stacked(1,:);
+    xcj = xcm_stacked(1);
+    ycj = ycm_stacked(1);
     x_rot_j = xcj + (xj - xcj)*cos(gamma_j) - (yj - ycj)*sin(gamma_j);
     y_rot_j = ycj + (xj - xcj)*sin(gamma_j) + (yj - ycj)*cos(gamma_j);
-
-    % store these to compute domain boundaries in a sec
-    rotated_x(i,:) = x_rot_i;
-    rotated_y(i,:) = y_rot_i;
-
-    dx = x_rot_i' - x_rot_j;
-    dy = y_rot_i' - y_rot_j;
-
-    d = min(hypot(dx, dy), [], 'all');
-    min_edge_distance = min(min_edge_distance, d);
-    end
+    rotated_x(M,:) = x_rot_j;
+    rotated_y(M,:) = y_rot_j;
 end
+
+
 
 if isfinite(min_edge_distance)
     smallestLengthScale = min(L,min_edge_distance);
@@ -132,9 +150,7 @@ if isnan(N)
     N = min(Nmax,max(N,Nmin));
 end
 
-% store last boundary to compute domain boundaries in a sec
-rotated_x(M,:) = x_rot_j;
-rotated_y(M,:) = y_rot_j;
+
 
 % resample countor uniformly in arclength with N points
 s = [0; cumsum(hypot(diff(x_nodes_prior'), diff(y_nodes_prior')))];
@@ -364,7 +380,7 @@ if MassOrDensity
     else
         % Surface area of the wavy surface
         dA_magnitude = sqrt(dAx.^2 + dAy.^2 + dAz.^2);
-        A_wavy = sum(dA_magnitude(inside));
+        A_wavy = sum(dA_magnitude);
         fprintf('Particle density per unit length (0 thickness): %.2f g/cm^2\n',m_stacked(1)/A_wavy);
     end
 else
@@ -373,7 +389,7 @@ else
     else
         % Surface area of the wavy surface
         dA_magnitude = sqrt(dAx.^2 + dAy.^2 + dAz.^2);
-        A_wavy = sum(dA_magnitude(inside));
+        A_wavy = sum(dA_magnitude);
         m = ParticleDensity * A_wavy;
     end
     m_stacked = m*ones(M,1);
@@ -473,7 +489,8 @@ hWaitbar = waitbar(0,'Finding lone particle equilibrium...', 'Name', 'Status');
 
 
 % compute Jacobian of lone particle prior to equilibrium
-J_lone = Jacobian(1,x_nodes_stacked(1,:),y_nodes_stacked(1,:),xcm_stacked(1),ycm_stacked(1),...
+
+[J_lone, J_lone_cap, J_lone_hydro] = Jacobian_Separated(1,x_nodes_stacked(1,:),y_nodes_stacked(1,:),xcm_stacked(1),ycm_stacked(1),...
     xcog_stacked(1,:),ycog_stacked(1,:),zcm_dist_stacked(1),gamma_stacked(1),m,zcm_height_stacked(1),...
     N_surf_lone_cell,dA_surf_lone_cell,X_grid_lone_cell,Y_grid_lone_cell,Z_grid_lone_cell,...
     alpha_stacked(1),beta_stacked(1),x_proj_stacked(1,:),y_proj_stacked(1,:),H_stacked(:,1),...
@@ -569,7 +586,7 @@ while 1
     Tz_baseline = Tz;
 
     % compute Jacobian
-    J_lone = Jacobian(1,x_nodes_stacked(1,:),y_nodes_stacked(1,:),xcm_stacked(1),ycm_stacked(1),...
+    J_lone = Jacobian_Separated(1,x_nodes_stacked(1,:),y_nodes_stacked(1,:),xcm_stacked(1),ycm_stacked(1),...
         xcog_stacked(1,:),ycog_stacked(1,:),zcm_dist_stacked(1),gamma_stacked(1),m,zcm_height_lone,...
         N_surf_lone_cell,dA_surf_lone_cell,X_grid_lone_cell,Y_grid_lone_cell,Z_grid_lone_cell,...
         alpha_lone,beta_lone,x_proj_lone,y_proj_lone,H_lone,...
@@ -760,12 +777,14 @@ end
 %% iteration to find equilibrium
 
 Jacobians = cell(max_iters,1);
+Jacobians_cap = cell(max_iters,1);
+Jacobians_hydro = cell(max_iters,1);
 
 hWaitbar = waitbar(0,'Finding full assembly equilibrium...', 'Name', 'Status');
 
 
 % compute Jacobian
-J = Jacobian(M,x_nodes_stacked,y_nodes_stacked,xcm_stacked,ycm_stacked,...
+[J, J_cap, J_hydro] = Jacobian_Separated(M,x_nodes_stacked,y_nodes_stacked,xcm_stacked,ycm_stacked,...
     xcog_stacked,ycog_stacked,zcm_dist_stacked,gamma_stacked,m_stacked,zcm_height_stacked,...
     N_surf_stacked,dA_surf_stacked,X_grid_stacked,Y_grid_stacked,Z_grid_stacked,...
     alpha_stacked,beta_stacked,x_proj_stacked,y_proj_stacked,H_stacked,...
@@ -777,6 +796,8 @@ J = Jacobian(M,x_nodes_stacked,y_nodes_stacked,xcm_stacked,ycm_stacked,...
 
 
 Jacobians{1} = J;
+Jacobians_cap{1} = J_cap;
+Jacobians_hydro{1} = J_hydro;
 
 
 iters = 0;
@@ -905,7 +926,7 @@ while 1
 
 
     % compute Jacobian
-    J = Jacobian(M,x_nodes_stacked,y_nodes_stacked,xcm_stacked,ycm_stacked,...
+    [J, J_cap, J_hydro] = Jacobian_Separated(M,x_nodes_stacked,y_nodes_stacked,xcm_stacked,ycm_stacked,...
     xcog_stacked,ycog_stacked,zcm_dist_stacked,gamma_stacked,m_stacked,zcm_height_stacked,...
     N_surf_stacked,dA_surf_stacked,X_grid_stacked,Y_grid_stacked,Z_grid_stacked,...
     alpha_stacked,beta_stacked,x_proj_stacked,y_proj_stacked,H_stacked,...
@@ -918,6 +939,8 @@ while 1
     iters = iters + 1;
 
     Jacobians{iters+1} = J;
+    Jacobians_cap{iters+1} = J_cap;
+    Jacobians_hydro{iters+1} = J_hydro;
 
     if max(abs(Fz_stacked)) <= tol && max(abs(Tx_stacked)) <= tol && max(abs(Ty_stacked)) <= tol
         break;
@@ -973,22 +996,38 @@ EvaluateDomain(0,min_x,min_y,max_x,max_y,grid_range,N_domain,x_proj_stacked,y_pr
 Jacobians = Jacobians(~cellfun('isempty', Jacobians));
 Jacobians_scaled = Jacobians;
 
+Jacobians_cap = Jacobians_cap(~cellfun('isempty', Jacobians_cap));
+Jacobians_cap_scaled = Jacobians_cap;
 
-F0 = m*g;
+Jacobians_hydro = Jacobians_hydro(~cellfun('isempty', Jacobians_hydro));
+Jacobians_hydro_scaled = Jacobians_hydro;
+
+
+% nondimensionalize
+
+Bo = rho*g*L^2/sigma;
+
+F0_cap = sigma*L;
+F0_hydro = rho*g*L^3;
+
 Sq = diag(repmat([L, 1, 1], 1, M));
-Sr = diag(repmat([F0, F0*L, F0*L], 1, M));
 
-for i=1:length(Jacobians)
-    Jacobians_scaled{i} = Sr \ Jacobians{i} * Sq;
+Sr_cap = diag(repmat([F0_cap, F0_cap*L, F0_cap*L], 1, M));
+Sr_hydro = diag(repmat([F0_hydro, F0_hydro*L, F0_hydro*L], 1, M));
+
+for i = 1:length(Jacobians)
+    Jacobians_cap_scaled{i} = (Sr_cap \ Jacobians_cap{i} * Sq)/Bo;
+    Jacobians_hydro_scaled{i} = Sr_hydro \ Jacobians_hydro{i} * Sq;
+    Jacobians_scaled{i} = Jacobians_cap_scaled{i} + Jacobians_hydro_scaled{i};
 end
 
 
-PlotJacobian(M,Jacobians_scaled{1},'dimensionless initial ');
+PlotJacobian(M, ...
+    Jacobians_scaled{1}, Jacobians_cap_scaled{1}, Jacobians_hydro_scaled{1}, ...
+    Jacobians_scaled{end}, Jacobians_cap_scaled{end}, Jacobians_hydro_scaled{end},['$\rm Bo = ', num2str(Bo),'$. Top: non-equilibrium. Bottom: equilibrium.']);
 
-PlotJacobian(M,Jacobians_scaled{end},'dimensionless final ');
 
-
-%% show Jacobian evolution over time
+%% show Jacobian evolution over iterations
 
 diagonal_metric = zeros(iters+1,1);
 symmetry_metric = zeros(iters+1,1);
@@ -1012,7 +1051,7 @@ figure;
 subplot(2,1,1);
 plot(0:iters,diagonal_metric,'o-','LineWidth',1.5);
 xlabel('Iteration','Interpreter','latex');
-ylabel('$\|J-\rm{diag}(J)\|_F/\|J\|_F$', ...
+ylabel('$\|\tilde{J}-\rm{diag}(\tilde{J})\|_F/\|\tilde{J}\|_F$', ...
     'Interpreter','latex');
 grid on;
 title('how diagonal?');
@@ -1020,7 +1059,7 @@ title('how diagonal?');
 subplot(2,1,2);
 plot(0:iters,symmetry_metric,'o-','LineWidth',1.5);
 xlabel('Iteration','Interpreter','latex');
-ylabel('$\|J-J^T\|_F/\|J\|_F$', ...
+ylabel('$\|\tilde{J}-\tilde{J}^T\|_F/\|\tilde{J}\|_F$', ...
     'Interpreter','latex');
 grid on;
 title('how symmetric?');
@@ -1061,7 +1100,7 @@ yticklabels(labels_y);
 
 set(gca, ...
     'TickLabelInterpreter','latex', ...
-    'FontSize',12);
+    'FontSize',14);
 
 xlabel('$\lambda$','Interpreter','latex','FontSize',16);
 ylabel('$\mathbf{V}$','Interpreter','latex','FontSize',16);

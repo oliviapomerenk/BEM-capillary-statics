@@ -1,4 +1,4 @@
-function J = Jacobian(M,x_nodes_stacked,y_nodes_stacked,xcm_stacked,ycm_stacked,...
+function [J, J_cap, J_hydro] = Jacobian_Separated(M,x_nodes_stacked,y_nodes_stacked,xcm_stacked,ycm_stacked,...
     xcog_stacked,ycog_stacked,zcm_dist_stacked,gamma_stacked,m_stacked,zcm_height_stacked,...
     N_surf_stacked,dA_surf_stacked,X_grid_stacked,Y_grid_stacked,Z_grid_stacked,...
     alpha_stacked,beta_stacked,x_proj_stacked,y_proj_stacked,H_stacked,...
@@ -10,9 +10,13 @@ function J = Jacobian(M,x_nodes_stacked,y_nodes_stacked,xcm_stacked,ycm_stacked,
 
 
 
-J_cell = cell(M,M);
-J_plus = zeros(3,3,M,M); % plus block in Jacobian matrix
-J_minus = zeros(3,3,M,M); % minus block in Jacobian matrix
+J_cap_cell = cell(M,M);
+J_cap_plus = zeros(3,3,M,M); % plus block in Jacobian matrix
+J_cap_minus = zeros(3,3,M,M); % minus block in Jacobian matrix
+
+J_hydro_cell = cell(M,M);
+J_hydro_plus = zeros(3,3,M,M); % plus block in Jacobian matrix
+J_hydro_minus = zeros(3,3,M,M); % minus block in Jacobian matrix
 
 
 for k=1:M
@@ -145,17 +149,23 @@ for k=1:M
             Tz = Tz_men + Tz_buoyancy;
 
             if i==1 
-                J_plus(:,1,p,k) = [Fz; Tx; Ty];
+                J_cap_plus(:,1,p,k) = [Fz_meniscus; Tx_men; Ty_men];
+                J_hydro_plus(:,1,p,k) = [Fz_buoyancy; Tx_buoyancy; Ty_buoyancy];
             elseif i==2
-                J_minus(:,1,p,k) = [Fz; Tx; Ty];
+                J_cap_minus(:,1,p,k) = [Fz_meniscus; Tx_men; Ty_men];
+                J_hydro_minus(:,1,p,k) = [Fz_buoyancy; Tx_buoyancy; Ty_buoyancy];
             elseif i==3
-                J_plus(:,2,p,k) = [Fz; Tx; Ty];
+                J_cap_plus(:,2,p,k) = [Fz_meniscus; Tx_men; Ty_men];
+                J_hydro_plus(:,2,p,k) = [Fz_buoyancy; Tx_buoyancy; Ty_buoyancy];
             elseif i==4
-                J_minus(:,2,p,k) = [Fz; Tx; Ty];
+                J_cap_minus(:,2,p,k) = [Fz_meniscus; Tx_men; Ty_men];
+                J_hydro_minus(:,2,p,k) = [Fz_buoyancy; Tx_buoyancy; Ty_buoyancy];
             elseif i==5
-                J_plus(:,3,p,k) = [Fz; Tx; Ty];
+                J_cap_plus(:,3,p,k) = [Fz_meniscus; Tx_men; Ty_men];
+                J_hydro_plus(:,3,p,k) = [Fz_buoyancy; Tx_buoyancy; Ty_buoyancy];
             else
-                J_minus(:,3,p,k) = [Fz; Tx; Ty];
+                J_cap_minus(:,3,p,k) = [Fz_meniscus; Tx_men; Ty_men];
+                J_hydro_minus(:,3,p,k) = [Fz_buoyancy; Tx_buoyancy; Ty_buoyancy];
             end
         end
     end
@@ -164,17 +174,31 @@ end
 
 for k=1:M
     for p=1:M
-        Jpk = zeros(3,3);
-        Jpk_plus = J_plus(:,:,p,k);
-        Jpk_minus = J_minus(:,:,p,k);
-        Jpk(:,1) = (Jpk_plus(:,1) - Jpk_minus(:,1)) / (2*dz);
-        Jpk(:,2) = (Jpk_plus(:,2) - Jpk_minus(:,2)) / (2*dbeta);
-        Jpk(:,3) = (Jpk_plus(:,3) - Jpk_minus(:,3)) / (2*dalpha);
-        J_cell{p,k} = Jpk;
+        Jpk_cap = zeros(3,3);
+        Jpk_hydro = zeros(3,3);
+
+        Jpk_cap_plus = J_cap_plus(:,:,p,k);
+        Jpk_cap_minus = J_cap_minus(:,:,p,k);
+        Jpk_hydro_plus = J_hydro_plus(:,:,p,k);
+        Jpk_hydro_minus = J_hydro_minus(:,:,p,k);
+
+        Jpk_cap(:,1) = (Jpk_cap_plus(:,1) - Jpk_cap_minus(:,1)) / (2*dz);
+        Jpk_cap(:,2) = (Jpk_cap_plus(:,2) - Jpk_cap_minus(:,2)) / (2*dbeta);
+        Jpk_cap(:,3) = (Jpk_cap_plus(:,3) - Jpk_cap_minus(:,3)) / (2*dalpha);
+
+        Jpk_hydro(:,1) = (Jpk_hydro_plus(:,1) - Jpk_hydro_minus(:,1)) / (2*dz);
+        Jpk_hydro(:,2) = (Jpk_hydro_plus(:,2) - Jpk_hydro_minus(:,2)) / (2*dbeta);
+        Jpk_hydro(:,3) = (Jpk_hydro_plus(:,3) - Jpk_hydro_minus(:,3)) / (2*dalpha);
+
+        J_cap_cell{p,k} = Jpk_cap;
+        J_hydro_cell{p,k} = Jpk_hydro;
     end
 end
 
-J = cell2mat(J_cell); % full 3M x 3M Jacobian
+J_cap = cell2mat(J_cap_cell); % full 3M x 3M Jacobian
+J_hydro = cell2mat(J_hydro_cell); % full 3M x 3M Jacobian
+
+J = J_cap + J_hydro;
 
 
 end
